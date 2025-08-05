@@ -1,0 +1,130 @@
+//
+//  ViewController.swift
+//  CowryTakeHome
+//
+//  Created by Moses A. on 04/08/2025.
+//
+
+import UIKit
+import FlagKit
+
+class ViewController: UIViewController {
+    @IBOutlet public weak var firstAmountInputField: AmountInputField!
+    @IBOutlet public weak var secondAmountInputField: AmountInputField!
+    
+    @IBOutlet public weak var firstCurrencyField: CurrencySelectorField!
+    @IBOutlet public weak var secondCurrencyField: CurrencySelectorField!
+    
+    @IBOutlet public weak var errorLabel: UILabel!
+
+    
+    public var viewmodel: HomeViewModel?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Do any additional setup after loading the view.
+        setup()
+    }
+    
+    
+    @IBAction public func convert(sender: UIButton) {
+        errorLabel.text = ""
+        guard let value = Double.init(firstAmountInputField.text ?? "0.00") else { return }
+        guard let result = viewmodel?.convert(value: value) else { return }
+        secondAmountInputField.set(result)
+    }
+    
+    public func selectorFirst() {
+        setSelector(selector: firstCurrencyField, filter: []) { symbol in
+            self.firstAmountInputField.currencyLabel.text = symbol
+            self.firstAmountInputField.symbol = symbol
+            self.viewmodel?.convert(base: symbol, against: self.secondAmountInputField.symbol ?? "")
+        }
+    }
+
+    public func selectorSecond() {
+        setSelector(selector: secondCurrencyField, filter: []) { symbol in
+            self.secondAmountInputField.currencyLabel.text = symbol
+            self.secondAmountInputField.symbol = symbol
+            self.viewmodel?.convert(base: self.firstAmountInputField.symbol ?? "", against: symbol)
+        }
+    }
+    
+    
+    private func setSelector(selector: CurrencySelectorField, filter: [Symbol], handler:  @escaping (Symbol) -> Void) {
+        selector.currencyText.loadPickerViewForCustomView(data: viewmodel?.symbols ?? []) { selectedObject in
+            guard let item = selectedObject as? Country else { return }
+
+            var countryCode = item.symbol
+            countryCode.removeLast()
+            
+            let flag = Flag(countryCode: countryCode)
+            selector.currencyText.text = item.symbol
+            
+            let image = UIImageView.init(image: flag?.originalImage)
+            image.frame = .init(x: 4, y: 0, width: 20, height: 20)
+            selector.currencyText.leftView = image
+            selector.currencyText.leftViewMode = .always
+            handler(item.symbol)
+        } onDisplay: { (data, view) -> UIView in
+            guard let country = data as? Country else { return UIView() }
+            
+            var countryCode = country.symbol
+            countryCode.removeLast()
+            
+            let flag = Flag(countryCode: countryCode)
+            
+            let itemView = UIView()
+            itemView.tag = country.symbol.hashValue
+            
+            let icon = UIImageView()
+            icon.image = flag?.originalImage
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            itemView.addSubview(icon)
+            
+            icon.leadingAnchor.constraint(equalTo: itemView.leadingAnchor, constant: 16).isActive = true
+            icon.centerYAnchor.constraint(equalTo: itemView.centerYAnchor).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 15).isActive = true
+            icon.widthAnchor.constraint(equalToConstant: 15).isActive = true
+            
+            let title = UILabel()
+            title.textColor = UIColor.black
+            title.text = country.symbol
+            title.translatesAutoresizingMaskIntoConstraints = false
+            itemView.addSubview(title)
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 16).isActive = true
+            title.centerYAnchor.constraint(equalTo: itemView.centerYAnchor).isActive = true
+            title.trailingAnchor.constraint(equalTo: itemView.trailingAnchor, constant: -16).isActive = true
+            
+            return itemView
+        }
+    }
+    
+    
+    public func setup() {
+        guard let firstAmountInputField else { return }
+        
+        firstAmountInputField.onTyping = { [weak self] in
+            guard let self else { return }
+            secondAmountInputField.set("")
+        }
+        
+        let repository = DefaultRateRepository(client: AlamofireHTTPClient(), local: RealmDriver.instance)
+        let save = DefaultSaveConversion.init(repository: repository)
+        let fetchConversion = DefaultFetchConversionHistory(repository: repository)
+        let fetchRate = DefaultFetchRateUsecase(repository: repository)
+        let fetchSymbols = DefaultFetchSymbolsUsecase.init(repository: repository)
+        
+        viewmodel = DefaultHomeViewModel.init(saveConversionUsecase: save,
+                                              fetchConversionHistoryUsecase: fetchConversion,
+                                              fetchRateUsecase: fetchRate,
+                                              fetchSymbols: fetchSymbols)
+        
+        viewmodel?.errorHandler = { self.errorLabel.text = $0 }
+        viewmodel?.getSymbols(completion: {[weak self] in
+            self?.selectorFirst()
+            self?.selectorSecond()
+        })
+    }
+}
+
